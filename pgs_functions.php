@@ -43,6 +43,11 @@ function pgs_log ($message)
 }
 
 // [1] IDENTIFICA QUAL É A LOJA ATIVA E GUARDA NO BANCO DE DADOS
+// A loja ativa fica guardada no banco pois o shopping cart só é carregado
+// muito tempo depois pelo woocommerce, _após_ a carga dos parâmetros dos
+// meios de pagamento. Assim, é importante sabermos _antes_ de carregar os
+// parâmetros dos meios de pagamento qual é a loja ativa, e fazemos isso aqui.
+//
 function pgs_woocommerce_cart_loaded_from_session ()
 {
     if (WC()->cart->get_cart_contents_count() != 0)
@@ -83,7 +88,7 @@ function pgs_hook_pre_option ($value, $option, $default)
     {
         // Se não há nenhuma loja ativa, retorna a opção default,
         // mesmo que exista um registro válido para a opção no banco de dados
-        pgs_log ("Nenhuma loja ativa, retornando default");
+        pgs_log ("############################################ Nenhuma loja ativa, retornando default");
         return ($default);
     }
     
@@ -92,7 +97,7 @@ function pgs_hook_pre_option ($value, $option, $default)
     // retornar um valor incorreto. Isso é tratado retornando false no hook
     // get_option sempre.
     pgs_log ("get_option: pgs_${PGS_CURRENT_STORE}_$option");
-    $value = get_option ("pgs_${PGS_CURRENT_STORE}_$option", $default);    
+    $value = get_option ("pgs_${PGS_CURRENT_STORE}_$option", $default);
     pgs_log ("get_option: RETURN=".print_r($value, true));    
     return ($value);
 }
@@ -101,33 +106,75 @@ function pgs_hook_option ($value, $option)
 {
     global $PGS_CURRENT_STORE;
 
-    pgs_log ("pgs_get_option: $PGS_CURRENT_STORE FALSE option=[$option] value=[$value]");    
+    pgs_log ("pgs_get_option: ############################################ $PGS_CURRENT_STORE FALSE option=[$option] value=[$value]");
+
+    // Trata ordem dos gateways
+    if ($option == 'woocommerce_gateway_order')
+    {
+        // Precisamos de uma ordem dos gateways válida para fechar o pedido
+        pgs_log ("get_option: retornando woocommerce_gateway_order válido");
+        return ($value);
+    }    
     return (false);
 }
 
-function pgs_update_option ()
+function pgs_pre_update_option ($value, $old_value, $option)
 {
-
+    global $PGS_CURRENT_STORE;
+    
+    pgs_log ("pgs_pre_update_option: $PGS_STORE_ADMIN value=[$value] option=[$option] old_value=[$old_value]");
+    
+    if (empty ($PGS_CURRENT_STORE))
+    {
+        pgs_log ("############################################ Nenhuma loja ativa, atualizando normalmente");
+        return ($value);
+    }
+    
+    // Grava o valor vinculado à loja
+    update_option ("pgs_${PGS_CURRENT_STORE}_${option}", $value);
+    
+    // Retorna o valor antigo, efetivamente evitando gravar o valor normal
+    return ($old_value);
 }
 
-function pgs_add_option ()
+// Aparentemente add_option() não é utilizada no woocommerce nem nos plugins
+//
+function pgs_add_option ($option, $value)
 {
-
+    global $PGS_CURRENT_STORE;
+    
+    pgs_log ("pgs_add_option: $PGS_STORE_ADMIN value=[$value] option=[$option] ##EXCEPTION##");
+    
+    if (empty ($PGS_CURRENT_STORE))
+    {
+        pgs_log ("############################################ Nenhuma loja ativa, atualizando normalmente");
+        return ($value);
+    }
+    
+    // Grava o valor vinculado à loja
+    update_option ("pgs_${PGS_CURRENT_STORE}_${option}", $value);
 }
 
 function pgs_setup_option_filters ($store_name)
 {
     $option_list = array 
     (
-        'woocommerce_ppec_paypal_settings',
-        'woocommerce_rede_credit_settings',
-        'pp_woo_liveApiCredentials'
+        'woocommerce_cielo_debit_settings',     // Cielo - Cartão de débito
+        'woocommerce_cielo_credit_settings',    // Cielo - Cartão de crédito
+        'woocommerce_pagseguro_settings',       // PagSeguro
+        'woocommerce_rede_credit_settings',     // Pague com a Rede
+        'woocommerce_paypal_settings',          // PayPal Standard
+        'woocommerce_ppec_paypal_settings',     // PayPal Checkout
+        'pp_woo_liveApiCredentials',
+        'woocommerce_gateway_order'
     );
 
     foreach ($option_list as $option)
     {
         add_filter ('pre_option_'.$option, pgs_hook_pre_option, 10, 3);
         add_filter ('option_'.$option, pgs_hook_option, 10, 2);
+        add_filter ('pre_update_option_'.$option, pgs_pre_update_option, 10, 3);
+        add_filter ('add_option'.$option, pgs_add_option, 10, 2);
         
         wp_cache_delete ($option, 'options');
     }
@@ -231,9 +278,15 @@ function pgs_do_parse_request ($continue, $wp, $extra_query_vars)
     return ($continue);
 }
 
+// Sobre o checkout Cielo:
+// Foi necessário registrar a opção 'woocommerce_force_ssl_checkout' para
+// 'yes', mesmo a Store já estando em HTTPS, caso contrário o pagamento via
+// cartão nunca é habilitado devido a uma checagem em:
+//      class-wc-cielo-helper.php -> checks_for_webservice()
+
 function enable_hooks ()
 {
-    $client_ip = "177.66.75.171";
+    $client_ip = "177.66.73.167";
     
     if ($_SERVER['REMOTE_ADDR'] == $client_ip) 
     {
