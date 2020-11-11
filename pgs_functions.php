@@ -1,12 +1,38 @@
 <?php
 
+// Informações úteis:
+//
+// [1]
 // Necessario habilitar em wp-includes/functions.php usando:
 // require ABSPATH . 'wp-content/payment_gateway_switcher/pgs_functions.php';
+//
+// [2]
+// Sobre o checkout Cielo:
+// Foi necessário registrar a opção 'woocommerce_force_ssl_checkout' para
+// 'yes', mesmo a Store já estando em HTTPS, caso contrário o pagamento via
+// cartão nunca é habilitado devido a uma checagem em:
+//      class-wc-cielo-helper.php -> checks_for_webservice()
+
+function pgs_log ($message)
+{
+    $log_file_path = "/srv/www/store.conscienciologia.org.br/log/pgs.log";
+    error_log (date ("d-m-Y, H:i:s") . ": " . $message . "\n", 3, $log_file_path);
+}
+
+function pgs_test ()
+{
+    return ("PGS disponivel");
+}
+
+//=================================================================================================
+// FILTRAGEM DO CARRINHO POR LOJA ATIVA
+// Permite adicionar no carrinho somente produtos da mesma loja.
+//=================================================================================================
 
 /* Filtro por marca
  * https://stackoverflow.com/questions/62372430/how-can-i-create-a-cart-for-each-brand-in-woocommerce
  */
-add_filter( 'woocommerce_add_to_cart_validation', 'only_one_product_brand_allowed', 20, 3 );
+
 function only_one_product_brand_allowed( $passed, $product_id, $quantity) {
     $taxonomy    = 'product_brand';
     $field_names = array( 'fields' => 'names');
@@ -36,11 +62,51 @@ function only_one_product_brand_allowed( $passed, $product_id, $quantity) {
     return $passed;
 }
 
-function pgs_log ($message)
+//=================================================================================================
+// CARGA DAS CONFIGURAÇÕES DE PAGAMENTO DO ICNET
+//=================================================================================================
+
+function icnet_api ($params)
 {
-    $log_file_path = "/srv/www/store.conscienciologia.org.br/log/log-hook-calls.log";
-    error_log (date ("d-m-Y, H:i:s") . ": " . $message . "\n", 3, $log_file_path);
+    $ICNET_URL = 'https://icnetapi.azurewebsites.net/api/woocommerce/';
+
+    // Constrói e realiza a chamada remota para API
+    $curl = curl_init();
+    curl_setopt($curl, CURLOPT_URL, $ICNET_URL . '/' . $params);
+    curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+    $output = curl_exec($curl);
+    curl_close($curl);
+
+    //debug ("==> output >$output<");
+
+    // Respostas vazias são sinalizadas como ""
+    if ($output == '""')
+    {
+        return (false);
+    }
+    
+    // Decodifica um json válido
+    $json = json_decode (trim (stripcslashes ($output), '"'), true);
+
+    // Se o json estiver corrompido json_decode retorna NULL
+    if ($json == NULL)
+    {
+        return (false);
+    }
+    
+    // Retorna os dados da API já decodificados
+    return ($json);
 }
+
+function icnet_getSettingsPayments ()
+{
+    return (icnet_api ("getSettingsPayments"));
+}
+
+//=================================================================================================
+// FILTRAGEM DOS PARÂMETROS DE PAGAMENTO
+// Filtra a configuração dos meios de pagamento de acordo com a loja ativa.
+//=================================================================================================
 
 // [1] IDENTIFICA QUAL É A LOJA ATIVA E GUARDA NO BANCO DE DADOS
 // A loja ativa fica guardada no banco pois o shopping cart só é carregado
@@ -72,6 +138,27 @@ function pgs_woocommerce_cart_loaded_from_session ()
     pgs_log ('Carrinho vazio - nenhuma loja ativa');
 }
 
+function default_woocommerce_gateway_order ()
+{
+    return (array
+    (
+        'jrossetto_woo_cielo_webservice' => 0,
+        'jrossetto_woo_cielo_webservice_debito' => 1,
+        'rede_credit' => 2,
+        'ppec_paypal' => 3,
+        'pagseguro' => 4,
+        'jrossetto_woo_cielo_webservice_boleto' => 5,
+        'jrossetto_woo_cielo_webservice_tef' => 6,
+        'paypal' => 7,
+        'bacs' => 8,
+        'cheque' => 9,
+        'cod' => 10,
+        'yith-paypal-ec' => 11,
+        'cielo_credit' => 12,
+        'cielo_debit' => 13
+    ));
+}
+
 function pgs_hook_pre_option ($value, $option, $default)
 {
     global $PGS_CURRENT_STORE;
@@ -90,6 +177,12 @@ function pgs_hook_pre_option ($value, $option, $default)
         // mesmo que exista um registro válido para a opção no banco de dados
         pgs_log ("############################################ Nenhuma loja ativa, retornando default");
         return ($default);
+    }
+    
+    if ($option == 'woocommerce_gateway_order')
+    {
+        // Retornamos sempre uma ordem padronizada dos meios de pagamento
+        return (default_woocommerce_gateway_order ());
     }
     
     // Existe uma loja ativa, então retorna o valor mapeado. No caso especial 
@@ -165,19 +258,27 @@ function pgs_setup_option_filters ($store_name)
         'woocommerce_rede_credit_settings',     // Pague com a Rede
         'woocommerce_paypal_settings',          // PayPal Standard
         'woocommerce_ppec_paypal_settings',     // PayPal Checkout
+        'woocommerce_jrossetto_woo_cielo_webservice_settings', // Cielo - API 3.0
         'pp_woo_liveApiCredentials',
         'woocommerce_gateway_order'
     );
 
     foreach ($option_list as $option)
     {
-        add_filter ('pre_option_'.$option, pgs_hook_pre_option, 10, 3);
-        add_filter ('option_'.$option, pgs_hook_option, 10, 2);
-        add_filter ('pre_update_option_'.$option, pgs_pre_update_option, 10, 3);
-        add_filter ('add_option'.$option, pgs_add_option, 10, 2);
+        // Estes são os filtros de leitura
+        add_filter ('pre_option_'.$option, 'pgs_hook_pre_option', 10, 3);
+        add_filter ('option_'.$option, 'pgs_hook_option', 10, 2);
+        
+        // Este é o filtro de gravação
+        add_filter ('pre_update_option_'.$option, 'pgs_pre_update_option', 10, 3);
+        
+        // Este filtro NÃO é usado, mas é suportado
+        add_filter ('add_option'.$option, 'pgs_add_option', 10, 2);
         
         wp_cache_delete ($option, 'options');
     }
+    
+    pgs_log ("pgs_setup_option_filters - Pagamentos configurados: ".$PGS_CURRENT_STORE);
 }
 
 // [2] TENTA CARREGAR DO BANCO DE DADOS A LOJA ATIVA, O MAIS CEDO POSSIVEL
@@ -226,48 +327,21 @@ function pgs_woocommerce_loaded ()
         // Nenhuma loja ativa
         $PGS_CURRENT_STORE = false;
     }
-    
+
+    pgs_log ("pgs_woocommerce_loaded - CURRENT_STORE: ".$PGS_CURRENT_STORE);
+
     if (!empty ($PGS_CURRENT_STORE))
     {
-        // Ativa os filtros para compra
+        // Existe uma loja ativa, portanto carrega as configurações de pagamento
+        // existentes para a loja. Aqui é onde a mágica efetivamente entra em ação.
         pgs_setup_option_filters ($PGS_CURRENT_STORE);
-    }
-    
-    pgs_log ("pgs_woocommerce_loaded - CURRENT_STORE: ".$PGS_CURRENT_STORE);
-}
-
-// [3] INFORMA QUAL É A LOJA ATIVA CONFORME GRAVADO NO BANCO DE DADOS
-// function pgs_option_woocommerce_ppec_paypal_settings ($value)
-// {
-//     global $PGS_CURRENT_STORE;
-//     
-//     pgs_log ('woocommerce_ppec_paypal_settings: CURRENT_STORE = '.$PGS_CURRENT_STORE);
-//     return ($value);
-// }
-
-function seleciona_meios_pagamento ()
-{
-    $taxonomy    = 'product_brand';
-    $field_names = array( 'fields' => 'names');
-
-    $cart_item = reset (WC()->cart->get_cart ());
-    pgs_log ('select: '.print_r($cart_item, true));
-    if( $item_term_name = wp_get_post_terms( $cart_item['product_id'], $taxonomy, $field_names ) ) {
-        $item_term_name = reset($item_term_name);
-    }
-
-    pgs_log ('seleciona_meios_pagamento: '.$item_term_name);
+    }    
 }
 
 function pgs_pre_http_request ($response, array $args, $url )
 {
     pgs_log ("-------------- CALL: $url");
     return (false);
-}
-
-function log_hook_calls()
-{
-    pgs_log (current_filter ());
 }
 
 // Main processing: https://roots.io/routing-wp-requests/
@@ -278,20 +352,153 @@ function pgs_do_parse_request ($continue, $wp, $extra_query_vars)
     return ($continue);
 }
 
-// Sobre o checkout Cielo:
-// Foi necessário registrar a opção 'woocommerce_force_ssl_checkout' para
-// 'yes', mesmo a Store já estando em HTTPS, caso contrário o pagamento via
-// cartão nunca é habilitado devido a uma checagem em:
-//      class-wc-cielo-helper.php -> checks_for_webservice()
+//=================================================================================================
+// TOP SIDEBAR
+//=================================================================================================
+
+function pgs_wid_content_html ()
+{
+    global $PGS_CURRENT_STORE;
+    
+    if (empty ($PGS_CURRENT_STORE))
+    {        
+        // Retorna um globo sem mais informações
+        return ('<span title="Pagamento Inteligente ativo">'.
+                '<img draggable="false" role="img" class="emoji" alt="&#127760;" src="https://s.w.org/images/core/emoji/13.0.0/svg/1f310.svg">'.
+                '</span>');
+    }
+    
+    // Retorna um cartãozinho e o nome da loja
+    return ('<span title="Pagamentos para '.$PGS_CURRENT_STORE.'">' .
+            '<img draggable="false" role="img" class="emoji" alt="&#128179;" src="https://s.w.org/images/core/emoji/13.0.0/svg/1f4b3.svg">' .
+            $PGS_CURRENT_STORE.
+            '</span>');
+}
+
+//=================================================================================================
+// CRON
+//=================================================================================================
+
+function grava_parametrizacao_cielo_credito ($IC, $settings)
+{
+    $fields = array
+    (
+        'cielo_credit_enabled',
+        'cielo_credit_title',
+        'cielo_credit_environment',
+        'cielo_credit_number',
+        'cielo_credit_key',
+        'cielo_credit_methods',
+        'cielo_credit_installments',
+        'cielo_credit_interest',
+        'cielo_credit_interest_rate',
+        'cielo_credit_smallest_installment',
+        'cielo_credit_installment_type'
+    );
+    
+    foreach ($fields as $field)
+    {
+        if (!array_key_exists ($field, $settings))
+        {
+            echo "AVISO: Configuração $IC não possui campo '$field', ignorando\n";
+            return;
+        }
+    }
+
+    $opt_value = array 
+    (
+        'imagem' => '',
+        'enabled' => $settings ['cielo_credit_enabled'] == 1? 'yes': 'no',
+        'title' => $settings ['cielo_credit_title'],
+        'testmode' => $settings ['cielo_credit_environment'] == 'Produção'? 'no': 'yes',
+        'afiliacao_details' => '',
+        'afiliacao' => $settings ['cielo_credit_number'], // Merchant ID
+        'chave' => $settings ['cielo_credit_key'], // Merchant Key
+        'softdescriptor' => substr ('MEGA '.$IC, 0, 13), // Máximo 13 alfabeticos
+        'meios' => preg_split ('/[\s]+/', 
+            str_replace (array ('[', ']'), " ", $settings ['cielo_credit_methods']),
+            -1, PREG_SPLIT_NO_EMPTY),
+        'autenticacao' => 'false',
+        'antifraude_details' => '',
+        'antifraude' => 'nao',
+        'verificaip' => '3',
+        'div' => ''.$settings ['cielo_credit_installments'],
+        'sem' => ''.$settings ['cielo_credit_interest'],
+        'juros' => ''.$settings ['cielo_credit_interest_rate'],
+        'minimo' => ''.$settings ['cielo_credit_smallest_installment'],
+        'parcelamento' => $settings ['cielo_credit_installment_type'] == 'client'? 'operadora': 'loja',
+        'captura' => 'automatica',
+        'aguardando' => 'wc-pending',
+        'pago' => 'wc-completed',
+        'autorizado' => 'wc-processing',
+        'cancelado' => 'wc-cancelled',
+        'negado' => 'wc-failed',
+        'debug' => 'no'
+    );
+
+    // Nome da opção
+    $opt_name = 'pgs_'.$IC.'_woocommerce_jrossetto_woo_cielo_webservice_settings';
+    
+    // Grava
+    update_option ($opt_name, $opt_value);
+    echo "update_option $opt_name => ".serialize ($opt_value)."\n";
+}
+
+function grava_parametrizacao ($IC, $settings)
+{
+    grava_parametrizacao_cielo_credito ($IC, $settings);
+}
+
+function pgs_cron ()
+{
+    echo "Sincronização ICNet - Pagamento Inteligente\n";
+    
+    $payment_settings = icnet_getSettingsPayments ();
+
+    if (empty ($payment_settings))
+    {
+        echo "AVISO: Retorno do ICNet vazio";
+        return;
+    }
+    
+    foreach ($payment_settings as $ic_settings)
+    {
+        // Extrai a IC e as configurações
+        $IC = $ic_settings ['IC'];
+        $settings = $ic_settings ['settings'][0];
+    
+        echo "Sincronizando IC: $IC\n";
+    
+        // Grava os parametros
+        grava_parametrizacao ($IC, $settings);
+    }
+
+    echo "Sincronização ICNet - Finalizada\n";
+}
+
+//=================================================================================================
+// INICIALIZAÇÃO
+//=================================================================================================
 
 function enable_hooks ()
 {
-    $client_ip = "177.66.73.167";
-    
-    if ($_SERVER['REMOTE_ADDR'] == $client_ip) 
+    if (php_sapi_name () === 'cli')
     {
-        if ( WP_DEBUG_LOG ) 
+        // Rodando localmente, PGS desativado mas Cron ativo
+        add_action ('pgs_cron', 'pgs_cron');
+        return;
+    }
+
+    // O icone do PGS sempre fica ativo, independente de testes
+    add_action ('pgs_wid_content', 'pgs_wid_content_html');
+
+    // Endereços de teste
+    if ($_SERVER['REMOTE_ADDR'] == "177.66.73.167" ||
+        $_SERVER['REMOTE_ADDR'] == "177.66.75.234")
+    {
+        if (WP_DEBUG_LOG)
         {
+            add_filter ('woocommerce_add_to_cart_validation', 'only_one_product_brand_allowed', 20, 3);
             add_action ('woocommerce_cart_loaded_from_session', 'pgs_woocommerce_cart_loaded_from_session');
             add_action ('woocommerce_loaded', 'pgs_woocommerce_loaded');
         }
