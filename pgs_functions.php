@@ -118,6 +118,40 @@ function pgs_woocommerce_cart_loaded_from_session ()
 {
     if (WC()->cart->get_cart_contents_count() != 0)
     {
+        // Pega o primeiro produto presente no carrinho de compras
+        $cart_item = reset (WC()->cart->get_cart ());
+        $product_id = $cart_item ['product_id'];
+
+        // Descobre qual o ID do vendedor do produto
+        $vendor_id = wcfm_get_vendor_id_by_post ($product_id);
+
+        // O vendor_id existe porque o produto está associado com uma loja
+        if ($vendor_id != 0)
+        {
+            global $PGS_CURRENT_STORE;
+
+            $PGS_CURRENT_STORE = strtoupper (get_user_meta ($vendor_id, 'store_name', true));
+            pgs_log ('Loja ativa: '.$PGS_CURRENT_STORE);
+
+            $cart_hash = WC()->cart->get_cart_hash();
+            add_option ("pgs_cart_${cart_hash}", $PGS_CURRENT_STORE, '', false);
+            return;
+        }
+        else
+        {
+            // Alguém criou o produto e esqueceu de vincular numa loja (Product data/Loja)
+            pgs_log ("AVISO: Produto $product_id sem loja vinculada!");
+        }
+    }
+
+    pgs_log ('Carrinho vazio - nenhuma loja ativa');
+}
+
+// Função deprecada
+function pgs_woocommerce_cart_loaded_from_session_BY_PRODUCT_BRAND ()
+{
+    if (WC()->cart->get_cart_contents_count() != 0)
+    {
         $taxonomy    = 'product_brand';
         $field_names = array( 'fields' => 'names');
         $cart_item = reset (WC()->cart->get_cart ());
@@ -320,7 +354,7 @@ function pgs_woocommerce_loaded ()
         $cart_hash = $_COOKIE['woocommerce_cart_hash'];
         
         // E tenta recuperar a loja ativa
-        $PGS_CURRENT_STORE = get_option ("pgs_${cart_hash}");
+        $PGS_CURRENT_STORE = get_option ("pgs_cart_${cart_hash}");
     }
     else
     {
