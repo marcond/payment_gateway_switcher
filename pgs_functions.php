@@ -29,11 +29,46 @@ function pgs_test ()
 // Permite adicionar no carrinho somente produtos da mesma loja.
 //=================================================================================================
 
+function only_one_product_store_allowed ($passed, $product_id, $quantity)
+{
+    // Descobre qual o ID do vendedor do produto
+    $add_product_vendor_id = wcfm_get_vendor_id_by_post ($product_id);
+
+    // Se o produto não está vinculado, não permite comprar
+    if ($add_product_vendor_id == 0)
+    {
+        $msg = "O curso não está vinculado com nenhuma IC. Por favor entre em contato com a IC responsável.";
+        wc_add_notice (sprintf (__("<span style='font-size:2.8rem;color:red;font-weight:500;'>$msg</span>", "woocommerce")), 'error' );
+        return (false);
+    }
+
+    // Faz a validação da loja somente se o carrinho já tiver algum produto
+    if (WC()->cart->get_cart_contents_count() != 0)
+    {
+        // Descobre qual o ID do vendedor do primeiro produto do carrinho de compras
+        $cart_item = reset (WC()->cart->get_cart ());
+        $product_id = $cart_item ['product_id'];
+        $cart_vendor_id = wcfm_get_vendor_id_by_post ($product_id);
+
+        // O vendedor do produto para adicionar é o mesmo?
+        if ($add_product_vendor_id != $cart_vendor_id)
+        {
+            // Não, vamos emitir uma mensagem de erro
+            $current_store = get_user_meta ($cart_vendor_id, 'store_name', true);
+            $msg = "Você já está comprando da <strong>%s</strong>. Por favor, finalize seu pedido antes de comprar em outra IC.";
+            wc_add_notice (sprintf (__("<span style='font-size:2.8rem;color:red;font-weight:500;'>$msg</span>", "woocommerce" ), $current_store), 'error');
+            return (false);
+        }
+    }
+
+    // Produto validado para ser adicionado
+    return ($passed);
+}
+
 /* Filtro por marca
  * https://stackoverflow.com/questions/62372430/how-can-i-create-a-cart-for-each-brand-in-woocommerce
  */
-
-function only_one_product_brand_allowed( $passed, $product_id, $quantity) {
+function only_one_product_brand_allowed_BY_PRODUCT_BRAND( $passed, $product_id, $quantity) {
     $taxonomy    = 'product_brand';
     $field_names = array( 'fields' => 'names');
 
@@ -532,7 +567,7 @@ function enable_hooks ()
     {
         if (WP_DEBUG_LOG)
         {
-            add_filter ('woocommerce_add_to_cart_validation', 'only_one_product_brand_allowed', 20, 3);
+            add_filter ('woocommerce_add_to_cart_validation', 'only_one_product_store_allowed', 20, 3);
             add_action ('woocommerce_cart_loaded_from_session', 'pgs_woocommerce_cart_loaded_from_session');
             add_action ('woocommerce_loaded', 'pgs_woocommerce_loaded');
         }
