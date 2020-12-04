@@ -626,6 +626,73 @@ function pgs_cron ()
 }
 
 //=================================================================================================
+// PRODUTOS POR SKU
+//=================================================================================================
+
+function pgs_rewrite_rules ()
+{
+    add_rewrite_rule
+    (
+        '^sku/([^/]*)/?',   // store.conscienciologia.org.br/sku/999999
+        'index.php?post_type=product&pgs_product_sku=$matches[1]',  // o link interno gerado
+        'top'
+    );
+}
+
+function pgs_register_query_vars ($vars)
+{
+    $vars[] = 'pgs_product_sku';
+    return ($vars);
+}
+
+function pgs_get_product_by_sku ($wp)
+{
+    if (is_admin() || !$wp->is_main_query ())
+    {
+        return;
+    }
+
+    // Se tiver nossa variavel interna, é a busca pelo sku
+    if (get_query_var ('pgs_product_sku' ))
+    {
+        $wp->query_vars['post_type'] = 'product';
+        $wp->query_vars['is_single'] = true ;
+        $wp->query_vars['is_singular'] = true;
+        $wp->query_vars['is_archive'] = false;
+
+        $product_sku = get_query_var ('pgs_product_sku' ) ;
+
+        // Conscienciograma sem Drama :)
+        if (function_exists ('wc_get_product_id_by_sku'))
+        {
+            $post_id = wc_get_product_id_by_sku ($product_sku);
+            pgs_log ("### SKU $product_sku mapeado para $post_id");
+        }
+        else // SKU não encontrado
+        {
+            $post_id = 0;
+        }
+
+        // Set the post ID here. This makes the magic happen.
+        $wp->query_vars['p'] = $post_id;
+
+        // This also makes the magic happen. It forces the template I need to be selected.
+        $wp->is_single = true ;
+        $wp->is_singular = true ;
+        $wp->is_archive = false ;
+        $wp->is_post_type_archive = false ;
+    }
+}
+
+function enable_product_by_sku ()
+{
+    pgs_log ("############################################ HABILITANDO SKU");
+    add_action ('init', 'pgs_rewrite_rules', 10, 0);
+    add_filter ('query_vars', 'pgs_register_query_vars');
+    add_action ('pre_get_posts', 'pgs_get_product_by_sku', 0, 2);
+}
+
+//=================================================================================================
 // INICIALIZAÇÃO
 //=================================================================================================
 
@@ -658,5 +725,7 @@ function enable_hooks ()
             //add_action ('woocommerce_loaded', 'pgs_woocommerce_loaded');
         }
     }
+
+    enable_product_by_sku ();
 }
 enable_hooks();
