@@ -228,6 +228,14 @@ function default_woocommerce_gateway_order ()
     ));
 }
 
+function payment_method_disabled ()
+{
+    return (array
+    (
+        'enabled' => 'no'
+    ));
+}
+
 function pgs_hook_pre_option ($value, $option, $default)
 {
     global $PGS_CURRENT_STORE;
@@ -259,8 +267,14 @@ function pgs_hook_pre_option ($value, $option, $default)
     // retornar um valor incorreto. Isso é tratado retornando false no hook
     // get_option sempre.
     pgs_log ("get_option: pgs_${PGS_CURRENT_STORE}_$option");
-    $value = get_option ("pgs_${PGS_CURRENT_STORE}_$option", $default);
-    pgs_log ("get_option: RETURN=".print_r($value, true));    
+    $value = get_option ("pgs_${PGS_CURRENT_STORE}_$option", false);
+    pgs_log ("get_option: RETURN=".print_r($value, true));
+
+    // Se a opção não existe, o método retornado volta sempre desabilitado
+    if ($value === false)
+    {
+        return (payment_method_disabled ());
+    }
     return ($value);
 }
 
@@ -465,6 +479,36 @@ function grava_parametrizacao_cielo_credito ($IC, $settings)
         'cielo_credit_installment_type'
     );
     
+//     echo "------------ IC: $IC -------------\n";
+//     print_r ($settings);
+
+    // Inicializa alguns campos opcionais
+    if (!array_key_exists ('cielo_credit_interest', $settings)
+        || empty ($settings ['cielo_credit_interest']))
+    {
+        if (array_key_exists ('cielo_credit_installments', $settings))
+        {
+            $settings ['cielo_credit_interest'] = $settings ['cielo_credit_installments'];
+        }
+        else
+        {
+            $settings ['cielo_credit_interest'] = '1';
+        }
+    }
+    if (!array_key_exists ('cielo_credit_interest_rate', $settings)
+        || empty ($settings ['cielo_credit_interest_rate']))
+    {
+        $settings ['cielo_credit_interest_rate'] = '0';
+    }
+    if (!array_key_exists ('cielo_credit_smallest_installment', $settings)
+        || empty ($settings ['cielo_credit_smallest_installment']))
+    {
+        $settings ['cielo_credit_smallest_installment'] = '1';
+    }
+
+//     echo "------------ Registro ajustado  -------------\n";
+//    print_r ($settings);
+
     foreach ($fields as $field)
     {
         if (!array_key_exists ($field, $settings))
@@ -474,12 +518,17 @@ function grava_parametrizacao_cielo_credito ($IC, $settings)
         }
     }
 
+    // Imprime o registro que está sendo sincronizado
+    echo "------------ Registro ajustado  -------------\n";
+    print_r ($settings);
+
+    // Mágica: cria o registro compatível com o plugin
     $opt_value = array 
     (
         'imagem' => '',
         'enabled' => $settings ['cielo_credit_enabled'] == 1? 'yes': 'no',
         'title' => $settings ['cielo_credit_title'],
-        'testmode' => $settings ['cielo_credit_environment'] == 'Produção'? 'no': 'yes',
+        'testmode' => strncasecmp ($settings ['cielo_credit_environment'], 'prod', 4)? 'yes': 'no',
         'afiliacao_details' => '',
         'afiliacao' => $settings ['cielo_credit_number'], // Merchant ID
         'chave' => $settings ['cielo_credit_key'], // Merchant Key
@@ -502,12 +551,16 @@ function grava_parametrizacao_cielo_credito ($IC, $settings)
         'autorizado' => 'wc-processing',
         'cancelado' => 'wc-cancelled',
         'negado' => 'wc-failed',
-        'debug' => 'no'
+        'debug' => 'yes' // debug é necessário para guardar os json das transações
     );
 
     // Nome da opção
     $opt_name = 'pgs_'.$IC.'_woocommerce_jrossetto_woo_cielo_webservice_settings';
-    
+
+    // Imprime o registro que está sendo gravado
+    echo "------------ Registro gravado  -------------\n";
+    print_r ($opt_value);
+
     // Grava
     update_option ($opt_name, $opt_value);
     echo "update_option $opt_name => ".serialize ($opt_value)."\n";
@@ -529,11 +582,38 @@ function pgs_cron ()
         echo "AVISO: Retorno do ICNet vazio";
         return;
     }
-    
+
+    // Verifica quando uma mensagem de erro é retornada
+    if (count ($payment_settings) == 1
+        && array_key_exists ('Message', $payment_settings))
+    {
+        echo 'ERRO: API ICNet retornou: '.$payment_settings ['Message']."\n";
+        print_r ($payment_settings);
+        echo "---//---\n";
+        return;
+    }
+
     foreach ($payment_settings as $ic_settings)
     {
+        if (!array_key_exists ('IC', $ic_settings))
+        {
+            echo "AVISO: Trecho de configuração não possui chave 'IC'\n";
+            print_r ($ic_settings);
+            echo "---//---\n";
+            continue;
+        }
+
         // Extrai a IC e as configurações
         $IC = $ic_settings ['IC'];
+
+        if (!array_key_exists ('settings', $ic_settings))
+        {
+            echo "AVISO: Trecho de configuração não possui chave 'settings'\n";
+            print_r ($ic_settings);
+            echo "---//---\n";
+            continue;
+        }
+
         $settings = $ic_settings ['settings'][0];
     
         echo "Sincronizando IC: $IC\n";
@@ -561,15 +641,21 @@ function enable_hooks ()
     // O icone do PGS sempre fica ativo, independente de testes
     add_action ('pgs_wid_content', 'pgs_wid_content_html');
 
+    // Adiciona os hooks para ativar o pagamento inteligente
+    add_filter ('woocommerce_add_to_cart_validation', 'only_one_product_store_allowed', 20, 3);
+    add_action ('woocommerce_cart_loaded_from_session', 'pgs_woocommerce_cart_loaded_from_session');
+    add_action ('woocommerce_loaded', 'pgs_woocommerce_loaded');
+
     // Endereços de teste
     if ($_SERVER['REMOTE_ADDR'] == "177.66.73.167" ||
         $_SERVER['REMOTE_ADDR'] == "177.66.75.234")
     {
         if (WP_DEBUG_LOG)
         {
-            add_filter ('woocommerce_add_to_cart_validation', 'only_one_product_store_allowed', 20, 3);
-            add_action ('woocommerce_cart_loaded_from_session', 'pgs_woocommerce_cart_loaded_from_session');
-            add_action ('woocommerce_loaded', 'pgs_woocommerce_loaded');
+            // Codigo deixado aqui para permitir testes especificos no futuro
+            //add_filter ('woocommerce_add_to_cart_validation', 'only_one_product_store_allowed', 20, 3);
+            //add_action ('woocommerce_cart_loaded_from_session', 'pgs_woocommerce_cart_loaded_from_session');
+            //add_action ('woocommerce_loaded', 'pgs_woocommerce_loaded');
         }
     }
 }
