@@ -55,7 +55,7 @@ function only_one_product_store_allowed ($passed, $product_id, $quantity)
         {
             // Não, vamos emitir uma mensagem de erro
             $current_store = get_user_meta ($cart_vendor_id, 'store_name', true);
-            $msg = "Você já está comprando da <strong>%s</strong>. Por favor, finalize seu pedido antes de comprar em outra IC.";
+            $msg = "Você já está comprando da <strong>%s</strong>. Por favor, finalize seu pedido antes de comprar em outra Instituição/Loja.";
             wc_add_notice (sprintf (__("<span style='font-size:2.8rem;color:red;font-weight:500;'>$msg</span>", "woocommerce" ), $current_store), 'error');
             return (false);
         }
@@ -459,6 +459,100 @@ function pgs_wid_content_html ()
 }
 
 //=================================================================================================
+// GERENCIAMENTO DOS ATRIBUTOS DOS PRODUTOS
+//=================================================================================================
+
+function scan_products ()
+{
+    $TAXONOMY = 'product_brand';
+
+    echo "------------ Processando produtos -------------\n";
+
+    $produtos_atualizados = 0;
+
+    $brand_product_args = array
+    (
+        'post_type' => 'product',
+        'posts_per_page' => -1,
+        'post_status' => 'publish',
+        'order' => 'desc',
+        'orderby' => 'date'
+    );
+
+    $query_result = new WP_Query ($brand_product_args);
+
+    if (empty ($query_result->posts))
+    {
+        echo "Nenhum produto encontrado\n";
+        return;
+    }
+
+    $product_array = $query_result->posts;
+
+    for ($i = 0; $i < count ($product_array); $i++)
+    {
+        $product = $product_array [$i];
+
+        // Descobre qual o ID do vendedor do produto
+        $vendor_id = wcfm_get_vendor_id_by_post ($product->ID);
+
+        // O vendor_id existe porque o produto está associado com uma loja
+        if ($vendor_id == 0)
+        {
+            continue;
+        }
+
+        // Recupera o profile da loja
+        $store_profile_settings = get_user_meta ($vendor_id, 'wcfmmp_profile_settings', true);
+
+        // Utilizamos o store_slug pois não contem acentuação ou carateres especiais,
+        // além de permitir mais de um usuário administrando a loja
+        if (empty ($store_profile_settings)
+            || !array_key_exists ('store_slug', $store_profile_settings))
+        {
+            // A configuração está incompleta
+            continue;
+        }
+
+        $vendor_name_slug = $store_profile_settings ['store_slug'];
+        $brands = wp_get_post_terms ($product->ID, $TAXONOMY);
+        $brand_ok = false;
+
+        // Verifica se a marca associada a loja já está setada
+        foreach ($brands as $brand)
+        {
+            if ($brand->slug == $vendor_name_slug)
+            {
+                $brand_ok = true;
+                break;
+            }
+        }
+
+        // Sim, não precisamos vincular o produto com a marca da loja
+        if ($brand_ok)
+        {
+            continue;
+        }
+
+        echo "Processando produto #$product->ID ($vendor_name_slug): $product->post_title\n";
+
+        $the_brand = get_term_by ('slug', $vendor_name_slug, $TAXONOMY);
+
+        if (empty ($the_brand))
+        {
+            echo "Erro: Marca não encontrada - produto não será atualizado\n";
+            continue;
+        }
+
+        echo "* Vinculando marca #$the_brand->term_id ($the_brand->name) no produto #$product->ID\n";
+        wp_add_object_terms ($product->ID, $the_brand->term_id, $TAXONOMY);
+        $produtos_atualizados++;
+    }
+
+    echo "------------ Produtos processados, $produtos_atualizados atualizados -------------\n";
+}
+
+//=================================================================================================
 // CRON
 //=================================================================================================
 
@@ -623,6 +717,9 @@ function pgs_cron ()
     }
 
     echo "Sincronização ICNet - Finalizada\n";
+
+    // Atualiza marcas e outros parâmetros nos produtos
+    scan_products ();
 }
 
 //=================================================================================================
