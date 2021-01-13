@@ -151,6 +151,15 @@ function icnet_getSettingsPayments ()
 //
 function pgs_woocommerce_cart_loaded_from_session ()
 {
+    // Se já definimos a loja ativa em outro hook, preserva
+    if (!empty ($GLOBALS['PGS_CURRENT_STORE']))
+    {
+        global $PGS_CURRENT_STORE;
+        pgs_log ('* Loja ativada: '.$PGS_CURRENT_STORE);
+        //pgs_log ('* Loja ativada: '.$GLOBALS['PGS_CURRENT_STORE']);
+        return;
+    }
+
     if (WC()->cart->get_cart_contents_count() != 0)
     {
         // Pega o primeiro produto presente no carrinho de compras
@@ -342,6 +351,7 @@ function pgs_setup_option_filters ($store_name)
         'woocommerce_paypal_settings',          // PayPal Standard
         'woocommerce_ppec_paypal_settings',     // PayPal Checkout
         'woocommerce_jrossetto_woo_cielo_webservice_settings', // Cielo - API 3.0
+        'woocommerce_bacs_settings',            // Transferência Bancária
         'pp_woo_liveApiCredentials',
         'woocommerce_gateway_order'
     );
@@ -409,6 +419,52 @@ function pgs_woocommerce_loaded ()
     {
         // Nenhuma loja ativa
         $PGS_CURRENT_STORE = false;
+    }
+
+    $pedido_recebido = '/checkout/pedido-recebido/';
+
+    // Processa exceção: rastrear order na página de confirmação do pedido.
+    // Isso é necessário porque o pagamento feito via Transferência Bancária
+    // mostra os dados de pagamento _após_ esvaziar o carrinho, então não
+    // é possível inferir a loja usando o método tradicional. Contudo, a loja
+    // fica registrada na Order e portanto é de lá que extraimos esse dado.
+    // SE HOUVER OUTRA LOJA ATIVA, SOBRESCREVE. Esse comportamento é intencional
+    // pois não queremos mostrar dados de pagamento da instituição errada.
+    if (isset ($_SERVER['REQUEST_URI'])
+        && strstr ($_SERVER['REQUEST_URI'], $pedido_recebido) !== false)
+    {
+        global $wpdb;
+
+        $request_path = $_SERVER['REQUEST_URI'];
+        $order_id = (int)substr ($request_path, strlen ($pedido_recebido));
+
+        pgs_log ("* Rastreando order #$order_id");
+
+        // O woocommerce ainda não inicializou 100%, então usamos sql direto
+        $sql_vendor_id =
+            "SELECT vendor_id FROM wp_wcfm_marketplace_orders WHERE order_id = $order_id";
+        $vendor_id = absint ($wpdb->get_var ($sql_vendor_id));
+
+        if ($vendor_id == 0)
+        {
+            pgs_log ("* Vendor id não encontrado");
+        }
+        else
+        {
+            pgs_log ("* Order vendor_id $vendor_id");
+
+            // Recupera o profile da loja
+            $store_profile_settings = get_user_meta ($vendor_id, 'wcfmmp_profile_settings', true);
+
+            // Utilizamos o store_slug pois não contem acentuação ou carateres especiais,
+            // além de permitir mais de um usuário administrando a loja
+            if (!empty ($store_profile_settings)
+                && array_key_exists ('store_slug', $store_profile_settings))
+            {
+                // Recuperamos a loja atual a partir do pedido!
+                $PGS_CURRENT_STORE = strtoupper ($store_profile_settings ['store_slug']);
+            }
+        }
     }
 
     pgs_log ("pgs_woocommerce_loaded - CURRENT_STORE: ".$PGS_CURRENT_STORE);
@@ -783,7 +839,7 @@ function pgs_get_product_by_sku ($wp)
 
 function enable_product_by_sku ()
 {
-    pgs_log ("############################################ HABILITANDO SKU");
+    pgs_log ("* Mapeamento SKU-produto Habilitado");
     add_action ('init', 'pgs_rewrite_rules', 10, 0);
     add_filter ('query_vars', 'pgs_register_query_vars');
     add_action ('pre_get_posts', 'pgs_get_product_by_sku', 0, 2);
