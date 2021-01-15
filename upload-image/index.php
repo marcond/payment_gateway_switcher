@@ -58,7 +58,7 @@ try
     // Valida wc_store (apenas alfanumericos permitidos)
     if (!ctype_alnum ($wc_store))
     {
-        throw new RuntimeException ("Erro: Caracteres invalidos em 'wc-store'", $ERR_WC_STORE_INVALIDO);
+        throw new RuntimeException ("Caracteres invalidos em 'wc-store'", $ERR_WC_STORE_INVALIDO);
     }
 
     // $file tem os dados do arquivo enviado
@@ -87,7 +87,7 @@ try
         }
         default:
         {
-            throw new RuntimeException ("Erro desconhecido: $file_error", $ERR_POST_ERRO_DESCONHECIDO);
+            throw new RuntimeException ("Falha desconhecida: $file_error", $ERR_POST_ERRO_DESCONHECIDO);
         }
     }
 
@@ -113,7 +113,7 @@ try
     if (!is_dir ($dest_file_dir)
         && !mkdir ($dest_file_dir, 0775, true))
     {
-        throw new RuntimeException ('Erro criando diretorios', $ERR_FALHA_CRIACAO_DIRETORIO);
+        throw new RuntimeException ('Falha criando diretorios', $ERR_FALHA_CRIACAO_DIRETORIO);
     }
 
     // Nome final do arquivo
@@ -131,7 +131,7 @@ try
 
     if (!move_uploaded_file ($file_tmp_name, $dest_file))
     {
-        throw new RuntimeException ('Erro ao armazenar o arquivo', $ERR_FALHA_COPIA_ARQUIVO);
+        throw new RuntimeException ('Falha ao armazenar o arquivo', $ERR_FALHA_COPIA_ARQUIVO);
     }
 
     // Arquivo armazenado com sucesso
