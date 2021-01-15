@@ -1,0 +1,13 @@
+<?php
+
+global $API_BASE_URL;
+$API_BASE_URL = "https://meudominio.com.br";
+
+// Diretorio onde o wordpress esta instalado
+global $API_BASE_DIR;
+$API_BASE_DIR = "/var/www/wordpress";
+
+// Diretorio onde os arquivos serao disponibilizados
+global $API_DATA_DIR;
+$API_DATA_DIR = "wp-content/api-files";
+

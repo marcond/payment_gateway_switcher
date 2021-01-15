@@ -1,0 +1,10 @@
+<?php
+
+global $API_KEYS;
+
+$API_KEYS = array
+(
+    "desenvolvimento" => "12345678-9abc-def0-123456789abcdef01",
+    "producao" =>        "f0945678-1244-5b05-8948df8a9abcd9c0b",
+);
+
