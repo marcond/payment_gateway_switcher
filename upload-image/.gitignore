@@ -1,4 +1,5 @@
 # Nunca armazenar as configuracoes validas
 api-keys.conf
 api-settings.conf
+test.php
 
