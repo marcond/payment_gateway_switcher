@@ -53,7 +53,7 @@ try
         throw new RuntimeException ('Parametros invalidos', $ERR_CHAVE_INVALIDA);
     }
 
-    $wc_store = $_POST ['wc-store'];
+    $wc_store = tolower ($_POST ['wc-store']);
 
     // Valida wc_store (apenas alfanumericos permitidos)
     if (!ctype_alnum ($wc_store))
