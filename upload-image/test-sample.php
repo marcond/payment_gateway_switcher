@@ -28,8 +28,8 @@
   </form>
 
   <h2>Informações úteis:</h2>
-  <p><b>Código deste teste:</b> <a href='https://github.com/marcond/payment_gateway_switcher/blob/master/upload-image/test.php' target='_blank'>
-    https://github.com/marcond/payment_gateway_switcher/blob/master/upload-image/test.php
+  <p><b>Código deste teste:</b> <a href='https://github.com/marcond/payment_gateway_switcher/blob/master/upload-image/test-sample.php' target='_blank'>
+    https://github.com/marcond/payment_gateway_switcher/blob/master/upload-image/test-sample.php
   </a></p>
   <p><b>Implementação da API:</b> <a href='https://github.com/marcond/payment_gateway_switcher/blob/master/upload-image/index.php' target='_blank'>
     https://github.com/marcond/payment_gateway_switcher/blob/master/upload-image/index.php
