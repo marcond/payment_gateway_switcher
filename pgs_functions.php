@@ -846,6 +846,136 @@ function enable_product_by_sku ()
 }
 
 //=================================================================================================
+// HOOK DE CRIAÇÃO DE PRODUTOS
+//=================================================================================================
+
+// $product - É um post
+// $vendor - É um user
+function update_product_brand ($product, $vendor)
+{
+    $TAXONOMY = 'product_brand';
+
+    // Recupera o profile da loja
+    $store_profile_settings = get_user_meta ($vendor->ID, 'wcfmmp_profile_settings', true);
+
+    pgs_log ("store_profile_settings:".print_r ($store_profile_settings, true));
+
+    // Utilizamos o store_slug pois não contem acentuação ou carateres especiais,
+    // além de permitir mais de um usuário administrando a loja
+    if (empty ($store_profile_settings)
+        || !array_key_exists ('store_slug', $store_profile_settings))
+    {
+        pgs_log ("no store slug");
+        // A configuração está incompleta
+        return;
+    }
+
+    pgs_log ("vai buscar marcas");
+
+    $vendor_name_slug = $store_profile_settings ['store_slug'];
+    $brands = wp_get_post_terms ($product->ID, $TAXONOMY);
+    $brand_ok = false;
+
+    pgs_log ("Marca: $vendor_name_slug");
+
+    // Verifica se a marca associada a loja já está setada
+    foreach ($brands as $brand)
+    {
+        if ($brand->slug == $vendor_name_slug)
+        {
+            $brand_ok = true;
+            break;
+        }
+    }
+
+    // Sim, não precisamos vincular o produto com a marca da loja
+    if ($brand_ok)
+    {
+        pgs_log ("MARCA ESTÁ OK $vendor_name_slug");
+        return;
+    }
+
+    pgs_log ("Processando produto #$product->ID ($vendor_name_slug): $product->post_title");
+
+    $the_brand = get_term_by ('slug', $vendor_name_slug, $TAXONOMY);
+
+    if (empty ($the_brand))
+    {
+        pgs_log ("Erro: Marca não encontrada - produto não será atualizado");
+        return;
+    }
+
+    pgs_log ("* Vinculando marca #$the_brand->term_id ($the_brand->name) no produto #$product->ID");
+    wp_add_object_terms ($product->ID, $the_brand->term_id, $TAXONOMY);
+}
+
+function update_post_author ($post, $user)
+{
+    pgs_log ("===== WILL UPDATE AUTHOR =====");
+    pgs_log (print_r ($post, true));
+    $author_update = array
+    (
+        'ID' => $post->ID,
+        'post_author' => $user->ID
+    );
+    wp_update_post ($author_update);
+    pgs_log ("===== UPDATED AUTHOR =====");
+    pgs_log ("Post [$post->ID] '$post->post_title' author $user->ID");
+}
+
+function pgs_wp_insert_post_hook ($post_id, $post, $update)
+{
+    pgs_log ("********************* POST HOOK *****************************");
+    pgs_log (print_r ($post, true));
+    pgs_log ("*************************************************************");
+    // Busca o metadado informando a loja
+    $meta_shop_name = get_post_meta ($post_id, 'shop_name', true);
+
+    pgs_log ("METADADO shop_name = '$meta_shop_name'");
+
+    // Se existir, garante que o post/produto está vinculado na loja certa
+    if (!empty ($meta_shop_name))
+    {
+        pgs_log ("--------------");
+        pgs_log ("wp_insert_post: post_id=$post_id update=$update");
+        pgs_log ("META shop_name = $meta_shop_name");
+
+        if (!empty ($user = get_user_by ('login', $meta_shop_name)))
+        {
+            if ($post->post_author != $user->ID)
+            {
+                update_post_author ($post, $user);
+            }
+
+            // Nós temos a loja, vamos verificar a marca
+            update_product_brand ($post, $user);
+        }
+        else
+        {
+            pgs_log ("Aviso: Usuário da loja não encontrado: $meta_shop_name");
+        }
+
+        pgs_log ("--------------");
+    }
+}
+
+function pgs_publish_post_hook ($id, $post)
+{
+    pgs_log ("****************** PUBLISH POST HOOK ************************");
+    pgs_log ("ID = $id");
+    pgs_log (print_r ($post, true));
+    $meta_shop_name = get_post_meta ($post_id, 'shop_name', true);
+    pgs_log ("METADADO shop_name = '$meta_shop_name'");
+    pgs_log ("*************************************************************");
+}
+
+function enable_wp_insert_post_hook ()
+{
+    add_action ('wp_insert_post', 'pgs_wp_insert_post_hook', 10, 3);
+    add_action ('publish_post', 'pgs_publish_post_hook', 10, 2);
+}
+
+//=================================================================================================
 // INICIALIZAÇÃO
 //=================================================================================================
 
@@ -866,6 +996,12 @@ function enable_hooks ()
     add_action ('woocommerce_cart_loaded_from_session', 'pgs_woocommerce_cart_loaded_from_session');
     add_action ('woocommerce_loaded', 'pgs_woocommerce_loaded');
 
+    // Adiciona filtro para url de produtos usando SKU
+    enable_product_by_sku ();
+
+    // Adiciona os hooks para criação de produto via ICNet
+    enable_wp_insert_post_hook ();
+
     // Endereços de teste
     if ($_SERVER['REMOTE_ADDR'] == "177.66.73.167" ||
         $_SERVER['REMOTE_ADDR'] == "177.66.75.234")
@@ -878,7 +1014,5 @@ function enable_hooks ()
             //add_action ('woocommerce_loaded', 'pgs_woocommerce_loaded');
         }
     }
-
-    enable_product_by_sku ();
 }
 enable_hooks();
