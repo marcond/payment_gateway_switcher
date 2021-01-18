@@ -839,44 +839,25 @@ function pgs_get_product_by_sku ($wp)
 
 function enable_product_by_sku ()
 {
-    pgs_log ("* Mapeamento SKU-produto Habilitado");
+    //pgs_log ("* Mapeamento SKU-produto Habilitado");
     add_action ('init', 'pgs_rewrite_rules', 10, 0);
     add_filter ('query_vars', 'pgs_register_query_vars');
     add_action ('pre_get_posts', 'pgs_get_product_by_sku', 0, 2);
 }
 
 //=================================================================================================
-// HOOK DE CRIAÇÃO DE PRODUTOS
+// TRIGGER/HOOK PARA AJUSTAR LOJA E MARCA DOS PRODUTOS CRIADOS
 //=================================================================================================
 
-// $product - É um post
-// $vendor - É um user
-function update_product_brand ($product, $vendor)
+function update_product_brand ($product_id, $vendor_user)
 {
-    $TAXONOMY = 'product_brand';
+    // A marca está vinculada diretamente no login do Vendor
+    $vendor_name_slug = strtolower ($vendor_user->user_login);
 
-    // Recupera o profile da loja
-    $store_profile_settings = get_user_meta ($vendor->ID, 'wcfmmp_profile_settings', true);
-
-    pgs_log ("store_profile_settings:".print_r ($store_profile_settings, true));
-
-    // Utilizamos o store_slug pois não contem acentuação ou carateres especiais,
-    // além de permitir mais de um usuário administrando a loja
-    if (empty ($store_profile_settings)
-        || !array_key_exists ('store_slug', $store_profile_settings))
-    {
-        pgs_log ("no store slug");
-        // A configuração está incompleta
-        return;
-    }
-
-    pgs_log ("vai buscar marcas");
-
-    $vendor_name_slug = $store_profile_settings ['store_slug'];
-    $brands = wp_get_post_terms ($product->ID, $TAXONOMY);
+    // Obtém a lista das marcas disponíveis para atribuir
+    $brand_taxonomy = 'product_brand';
+    $brands = wp_get_post_terms ($product_id, $brand_taxonomy);
     $brand_ok = false;
-
-    pgs_log ("Marca: $vendor_name_slug");
 
     // Verifica se a marca associada a loja já está setada
     foreach ($brands as $brand)
@@ -888,16 +869,14 @@ function update_product_brand ($product, $vendor)
         }
     }
 
-    // Sim, não precisamos vincular o produto com a marca da loja
+    // Retorna pois a marca já está configurada
     if ($brand_ok)
     {
-        pgs_log ("MARCA ESTÁ OK $vendor_name_slug");
         return;
     }
 
-    pgs_log ("Processando produto #$product->ID ($vendor_name_slug): $product->post_title");
-
-    $the_brand = get_term_by ('slug', $vendor_name_slug, $TAXONOMY);
+    // Obtem a marca que será configurada no produto usando Vendor login
+    $the_brand = get_term_by ('slug', $vendor_name_slug, $brand_taxonomy);
 
     if (empty ($the_brand))
     {
@@ -905,74 +884,64 @@ function update_product_brand ($product, $vendor)
         return;
     }
 
-    pgs_log ("* Vinculando marca #$the_brand->term_id ($the_brand->name) no produto #$product->ID");
-    wp_add_object_terms ($product->ID, $the_brand->term_id, $TAXONOMY);
+    pgs_log ("* Vinculando marca #$the_brand->term_id ($the_brand->name) no produto #$product_id");
+    wp_add_object_terms ($product_id, $the_brand->term_id, $brand_taxonomy);
 }
 
-function update_post_author ($post, $user)
+function pgs_woocommerce_rest_prepare_product_object_hook ($response, $product, $request)
 {
-    pgs_log ("===== WILL UPDATE AUTHOR =====");
-    pgs_log (print_r ($post, true));
-    $author_update = array
-    (
-        'ID' => $post->ID,
-        'post_author' => $user->ID
-    );
-    wp_update_post ($author_update);
-    pgs_log ("===== UPDATED AUTHOR =====");
-    pgs_log ("Post [$post->ID] '$post->post_title' author $user->ID");
-}
+    $product_id = $product->id;
+    $product_title = $product->name;
 
-function pgs_wp_insert_post_hook ($post_id, $post, $update)
-{
-    pgs_log ("********************* POST HOOK *****************************");
-    pgs_log (print_r ($post, true));
-    pgs_log ("*************************************************************");
-    // Busca o metadado informando a loja
-    $meta_shop_name = get_post_meta ($post_id, 'shop_name', true);
+    pgs_log ("### Verificando produto #$product_id: '$product_title'");
 
-    pgs_log ("METADADO shop_name = '$meta_shop_name'");
+    $meta_shop_name = get_post_meta ($product_id, 'shop_name', true);
 
-    // Se existir, garante que o post/produto está vinculado na loja certa
-    if (!empty ($meta_shop_name))
+    // Confirma se o produto contem o metadado certo
+    if (empty ($meta_shop_name))
     {
-        pgs_log ("--------------");
-        pgs_log ("wp_insert_post: post_id=$post_id update=$update");
-        pgs_log ("META shop_name = $meta_shop_name");
-
-        if (!empty ($user = get_user_by ('login', $meta_shop_name)))
-        {
-            if ($post->post_author != $user->ID)
-            {
-                update_post_author ($post, $user);
-            }
-
-            // Nós temos a loja, vamos verificar a marca
-            update_product_brand ($post, $user);
-        }
-        else
-        {
-            pgs_log ("Aviso: Usuário da loja não encontrado: $meta_shop_name");
-        }
-
-        pgs_log ("--------------");
+        pgs_log ("* Ignorando produto #$product_id - falta metadado 'shop_name'");
+        return;
     }
+
+    // Busca o usuario associado com a loja (Vendor)
+    if (!empty ($user = get_user_by ('login', $meta_shop_name)))
+    {
+        // Identifica qual loja (Vendor) é dona do produto (Post)
+        $post_author = get_post_field ('post_author', $product_id);
+
+        // Se forem diferentes, é preciso gravar o Vendor certo no produto
+        if ($post_author != $user->ID)
+        {
+            pgs_log ("* Ajustando produto #$product_id para loja #$post_author/$user->ID: $user->user_login");
+
+            // Atualiza o autor do post para o respectivo Vendor
+            $author_update = array
+            (
+                'ID' => $product_id,
+                'post_author' => $user->ID
+            );
+            wp_update_post ($author_update);
+        }
+
+        // Nós temos a loja, vamos verificar a marca
+        update_product_brand ($product_id, $user);
+    }
+    else
+    {
+        pgs_log ("Erro: Usuário da loja não encontrado: $meta_shop_name");
+    }
+
+    //-------------------------------------------------------
+    // Importante! Esta resposta é o retorno da chamada REST
+    //-------------------------------------------------------
+    return ($response);
 }
 
-function pgs_publish_post_hook ($id, $post)
+function enable_woocommerce_rest_prepare_product_object_hook ()
 {
-    pgs_log ("****************** PUBLISH POST HOOK ************************");
-    pgs_log ("ID = $id");
-    pgs_log (print_r ($post, true));
-    $meta_shop_name = get_post_meta ($post_id, 'shop_name', true);
-    pgs_log ("METADADO shop_name = '$meta_shop_name'");
-    pgs_log ("*************************************************************");
-}
-
-function enable_wp_insert_post_hook ()
-{
-    add_action ('wp_insert_post', 'pgs_wp_insert_post_hook', 10, 3);
-    add_action ('publish_post', 'pgs_publish_post_hook', 10, 2);
+    add_filter ('woocommerce_rest_prepare_product_object', 
+        'pgs_woocommerce_rest_prepare_product_object_hook', 10, 3 );
 }
 
 //=================================================================================================
@@ -1000,7 +969,7 @@ function enable_hooks ()
     enable_product_by_sku ();
 
     // Adiciona os hooks para criação de produto via ICNet
-    enable_wp_insert_post_hook ();
+    enable_woocommerce_rest_prepare_product_object_hook ();
 
     // Endereços de teste
     if ($_SERVER['REMOTE_ADDR'] == "177.66.73.167" ||
