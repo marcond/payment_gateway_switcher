@@ -857,22 +857,15 @@ function update_product_brand ($product_id, $vendor_user)
     // Obtém a lista das marcas disponíveis para atribuir
     $brand_taxonomy = 'product_brand';
     $brands = wp_get_post_terms ($product_id, $brand_taxonomy);
-    $brand_ok = false;
 
     // Verifica se a marca associada a loja já está setada
     foreach ($brands as $brand)
     {
         if ($brand->slug == $vendor_name_slug)
         {
-            $brand_ok = true;
-            break;
+            // Retorna pois a marca já está configurada
+            return;
         }
-    }
-
-    // Retorna pois a marca já está configurada
-    if ($brand_ok)
-    {
-        return;
     }
 
     // Obtem a marca que será configurada no produto usando Vendor login
