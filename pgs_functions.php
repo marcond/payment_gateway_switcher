@@ -775,7 +775,8 @@ function pgs_cron ()
     echo "Sincronização ICNet - Finalizada\n";
 
     // Atualiza marcas e outros parâmetros nos produtos
-    scan_products ();
+    // NOTA: ATUALIZAÇÃO DE MARCAS VIA CRON DESATIVADA EM FAVOR DO HOOK
+    // scan_products ();
 }
 
 //=================================================================================================
@@ -881,10 +882,10 @@ function update_product_brand ($product_id, $vendor_user)
     wp_add_object_terms ($product_id, $the_brand->term_id, $brand_taxonomy);
 }
 
-function pgs_woocommerce_rest_prepare_product_object_hook ($response, $product, $request)
+function verifica_loja_marca ($product)
 {
-    $product_id = $product->id;
-    $product_title = $product->name;
+    $product_id = $product->get_id ();
+    $product_title = $product->get_name ();
 
     pgs_log ("### Verificando produto #$product_id: '$product_title'");
 
@@ -896,6 +897,9 @@ function pgs_woocommerce_rest_prepare_product_object_hook ($response, $product, 
         pgs_log ("* Ignorando produto #$product_id - falta metadado 'shop_name'");
         return;
     }
+
+    // Corrige espaços em branco para underline
+    $meta_shop_name = str_replace (' ', '_', trim ($meta_shop_name));
 
     // Busca o usuario associado com a loja (Vendor)
     if (!empty ($user = get_user_by ('login', $meta_shop_name)))
@@ -924,10 +928,38 @@ function pgs_woocommerce_rest_prepare_product_object_hook ($response, $product, 
     {
         pgs_log ("Erro: Usuário da loja não encontrado: $meta_shop_name");
     }
+}
 
-    //-------------------------------------------------------
+function pgs_woocommerce_rest_prepare_product_object_hook ($response, $product, $request)
+{
+    verifica_loja_marca ($product);
+
+    //#######################################################
     // Importante! Esta resposta é o retorno da chamada REST
-    //-------------------------------------------------------
+    //#######################################################
+    return ($response);
+}
+
+function XXX_pgs_woocommerce_rest_prepare_product_object_hook ($response, $product, $request)
+{
+    pgs_log ("############# HOOK ##############");
+    pgs_log ("### RESPONSE".print_r ($response, true));
+    pgs_log ("### PRODUCT".print_r ($product, true));
+    pgs_log ("### REQUEST".print_r ($request, true));
+    $product_id = $product->get_id ();
+    pgs_log ("### PRODUCT ID = ".$product_id);
+    pgs_log ("### META = ".get_metadata ('post', $product_id, 'shop_name', true));    
+    pgs_log ("### META: ".get_post_meta ($product_id, 'shop_name', true));
+    
+    $meta_shop_name = get_post_meta ($product_id, 'shop_name', true);
+
+    // Confirma se o produto contem o metadado certo
+    if (empty ($meta_shop_name))
+    {
+        pgs_log ("* Ignorando produto #$product_id - falta metadado 'shop_name'");
+        return;
+    }
+    
     return ($response);
 }
 
