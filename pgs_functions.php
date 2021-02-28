@@ -727,9 +727,6 @@ function grava_parametrizacao_paypal ($IC, $settings)
         'paypal_api_signature'
     );
 
-//     echo "------------ IC: $IC -------------\n";
-//     print_r ($settings);
-
     foreach ($fields as $field)
     {
         if (!array_key_exists ($field, $settings))
@@ -824,6 +821,45 @@ function grava_parametrizacao_paypal ($IC, $settings)
     echo "update_option $opt_name => ".serialize ($opt_value)."\n";
 }
 
+function grava_parametrizacao_transferencia_bancaria ($IC, $settings)
+{
+    $fields = array
+    (
+        'bacs_enable',
+        'bacs_description'
+    );
+
+    foreach ($fields as $field)
+    {
+        if (!array_key_exists ($field, $settings))
+        {
+            echo "AVISO: Configuração $IC não possui campo '$field', ignorando\n";
+            return;
+        }
+    }
+
+    // Mágica: cria o registro compatível com o plugin
+    $opt_value = array
+    (
+        'enabled' => $settings ['bacs_enable'] == 1? 'yes': 'no',
+        'title' => 'Tranferência Bancária',
+        'description' => 'Faça o pagamento diretamente na nossa conta bancária. Por favor use o número do pedido como identificação, se for possível. Seu pagamento será confirmado assim que o valor depositado for liberado pelo banco.',
+        'instructions' => $settings ['bacs_description'],
+        'account_details' => ''
+    );
+
+    // Nome da opção
+    $opt_name = 'pgs_'.$IC.'_woocommerce_bacs_settings';
+
+    // Imprime o registro que está sendo gravado
+    echo "------------ Registro gravado  -------------\n";
+    print_r ($opt_value);
+
+    // Grava
+    update_option ($opt_name, $opt_value);
+    echo "update_option $opt_name => ".serialize ($opt_value)."\n";
+}
+
 function grava_parametrizacao ($IC, $settings)
 {
     echo "============= Gravando parâmetros de Pagamento =============\n";
@@ -831,6 +867,7 @@ function grava_parametrizacao ($IC, $settings)
 
     grava_parametrizacao_cielo_credito ($IC, $settings);
     grava_parametrizacao_paypal ($IC, $settings);
+    grava_parametrizacao_transferencia_bancaria ($IC, $settings);
 }
 
 function pgs_cron ()
