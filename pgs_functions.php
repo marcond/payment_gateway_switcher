@@ -669,8 +669,8 @@ function grava_parametrizacao_cielo_credito ($IC, $settings)
     }
 
     // Imprime o registro que está sendo sincronizado
-    echo "------------ Registro ajustado  -------------\n";
-    print_r ($settings);
+//    echo "------------ Registro ajustado  -------------\n";
+//    print_r ($settings);
 
     // Mágica: cria o registro compatível com o plugin
     $opt_value = array 
@@ -716,9 +716,121 @@ function grava_parametrizacao_cielo_credito ($IC, $settings)
     echo "update_option $opt_name => ".serialize ($opt_value)."\n";
 }
 
+function grava_parametrizacao_paypal ($IC, $settings)
+{
+    $fields = array
+    (
+        'paypal_enable',
+        'paypal_environment',
+        'paypal_api_username',
+        'paypal_api_password',
+        'paypal_api_signature'
+    );
+
+//     echo "------------ IC: $IC -------------\n";
+//     print_r ($settings);
+
+    foreach ($fields as $field)
+    {
+        if (!array_key_exists ($field, $settings))
+        {
+            echo "AVISO: Configuração $IC não possui campo '$field', ignorando\n";
+            return;
+        }
+    }
+
+    // Mágica: cria o registro compatível com o plugin
+    $opt_value = array
+    (
+        'enabled' => $settings ['paypal_enable'] == 1? 'yes': 'no',
+        'reroute_requests' => 'no',
+        'title' => 'PayPal',
+        'description' => 'Pague com PayPal',
+        'environment' => strtolower ($settings ['paypal_environment']),
+        'api_username' => $settings ['paypal_api_username'],
+        'api_password' => $settings ['paypal_api_password'],
+        'api_signature' => $settings ['paypal_api_signature'],
+        'api_certificate' => '',
+        'api_subject' => '',
+        'sandbox_api_username' => '',
+        'sandbox_api_password' => '',
+        'sandbox_api_signature' => '',
+        'sandbox_api_certificate' => '',
+        'sandbox_api_subject' => '',
+        'brand_name' => $IC,
+        'logo_image_url' => '',
+        'header_image_url' => '',
+        'page_style' => '',
+        'landing_page' => 'Billing',
+        'debug' => 'yes', // debug é necessário para guardar os json das transações
+        'invoice_prefix' => $IC,
+        'require_billing' => 'no',
+        'require_phone_number' => 'no',
+        'paymentaction' => 'sale',
+        'instant_payments' => 'yes',
+        'subtotal_mismatch_behavior' => 'add',
+        'use_spb' => 'yes',
+        'button_color' => 'gold',
+        'button_shape' => 'rect',
+        'button_label' => 'paypal',
+        'button_layout' => 'vertical',
+        'button_size' => 'responsive',
+        'hide_funding_methods' => Array
+        (
+            0 => 'CARD'
+        ),
+        'credit_enabled' => 'no',
+        'cart_checkout_enabled' => 'yes',
+        'mini_cart_settings_toggle' => 'no',
+        'mini_cart_button_layout' => 'vertical',
+        'mini_cart_button_size' => 'responsive',
+        'mini_cart_button_label' => 'paypal',
+        'mini_cart_hide_funding_methods' => Array
+        (
+            0 => 'CARD'
+        ),
+        'mini_cart_credit_enabled' => 'no',
+        'checkout_on_single_product_enabled' => 'no',
+        'single_product_settings_toggle' => 'yes',
+        'single_product_button_layout' => 'horizontal',
+        'single_product_button_size' => 'responsive',
+        'single_product_button_label' => 'paypal',
+        'single_product_hide_funding_methods' => Array
+        (
+            0 => 'CARD'
+        ),
+        'single_product_credit_enabled' => 'no',
+        'mark_enabled' => 'yes',
+        'mark_settings_toggle' => 'no',
+        'mark_button_layout' => 'vertical',
+        'mark_button_size' => 'responsive',
+        'mark_button_label' => 'paypal',
+        'mark_hide_funding_methods' => Array
+        (
+            0 => 'CARD'
+        ),
+        'mark_credit_enabled' => 'no'
+    );
+
+    // Nome da opção
+    $opt_name = 'pgs_'.$IC.'_woocommerce_ppec_paypal_settings';
+
+    // Imprime o registro que está sendo gravado
+    echo "------------ Registro gravado  -------------\n";
+    print_r ($opt_value);
+
+    // Grava
+    update_option ($opt_name, $opt_value);
+    echo "update_option $opt_name => ".serialize ($opt_value)."\n";
+}
+
 function grava_parametrizacao ($IC, $settings)
 {
+    echo "============= Gravando parâmetros de Pagamento =============\n";
+    print_r ($settings);
+
     grava_parametrizacao_cielo_credito ($IC, $settings);
+    grava_parametrizacao_paypal ($IC, $settings);
 }
 
 function pgs_cron ()
