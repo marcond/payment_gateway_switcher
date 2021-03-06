@@ -1119,6 +1119,22 @@ function enable_woocommerce_rest_prepare_product_object_hook ()
 }
 
 //=================================================================================================
+// AUTO-COMPLETE ORDERS
+//=================================================================================================
+
+// Fonte: https://docs.woocommerce.com/document/automatically-complete-orders/
+function custom_woocommerce_auto_complete_order ($order_id)
+{
+    if (!$order_id)
+    {
+        return;
+    }
+
+    $order = wc_get_order ($order_id);
+    $order->update_status ('completed');
+}
+
+//=================================================================================================
 // INICIALIZAÇÃO
 //=================================================================================================
 
@@ -1144,6 +1160,9 @@ function enable_hooks ()
 
     // Adiciona os hooks para criação de produto via ICNet
     enable_woocommerce_rest_prepare_product_object_hook ();
+
+    // Adiciona action para finalizar automaticamente os pedidos
+    add_action ('woocommerce_thankyou', 'custom_woocommerce_auto_complete_order');
 
     // Endereços de teste
     if ($_SERVER['REMOTE_ADDR'] == "177.66.73.167" ||
